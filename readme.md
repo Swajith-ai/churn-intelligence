@@ -1,174 +1,219 @@
-# Customer Churn Prediction Dashboard (Streamlit)
+# Churn Intelligence — Customer Churn Prediction Dashboard (Streamlit)
 
-This project implements a **Customer Churn Prediction System** using a trained Machine Learning model and a modern **Streamlit web dashboard**.
-
-The application is designed for real usage:
-- Predict churn probability for a **single customer**
-- Predict churn probability for **multiple customers (CSV upload)**
-- Show churn insights and trends from the dataset
-- Provide an **action playbook** and ready-to-use retention message templates
+**Churn Intelligence** is a product-style **Streamlit web dashboard** that predicts **customer churn probability** using a **pre-trained ML model**.  
+It supports **single customer scoring**, **paste-one scoring**, **CSV batch scoring**, **dataset insights**, a **retention playbook**, and **local scoring history**.
 
 ---
 
-## Problem Statement
-
-In subscription-based businesses (example: telecom), customers may leave due to pricing, service issues, poor support, or better competitors.
-
-Instead of reacting after churn happens, this project helps estimate **churn probability** early so a retention team can:
-- prioritize outreach
-- fix friction points
-- improve customer experience and retention
+## Live Demo
+https://churn-intelligence-dnahdem2j87nspxabz7ewg.streamlit.app/
 
 ---
 
-## Solution Approach
+## What this project does
 
-This solution follows a practical ML deployment workflow:
+### 1) Loads dataset + trained artifacts
+The app expects:
+- **Dataset**: `data/WA_Fn-UseC_-Telco-Customer-Churn.csv`
+- **Model artifacts**:
+  - `artifacts/customer_churn_model.pkl` (trained model + feature order)
+  - `artifacts/encoders.pkl` (LabelEncoders for categorical columns)
 
-1. Load a churn dataset to understand customer attributes and churn behavior
-2. Use a trained model for churn prediction (saved as artifacts)
-3. Encode categorical values consistently using saved encoders
-4. Build a Streamlit dashboard for:
-   - manual input scoring
-   - paste-based single-customer scoring
-   - CSV batch scoring and export
-   - insights charts
-   - retention playbooks
+These artifacts ensure that inputs are encoded and ordered exactly as required by the model during prediction.
+
+### 2) Predicts churn in 3 ways
+- **Manual input** (single customer form)
+- **Paste one customer** (1-row CSV with header)
+- **Batch scoring** (upload CSV → adds results → download scored CSV)
+
+### 3) Shows decision + guidance
+After scoring, the UI shows:
+- Churn probability
+- Risk label (Low Risk / At Risk / High Risk) based on a threshold slider
+- Recommended SLA (how fast to contact)
+- “Signals to check” (rule-based guidance)
+- Retention playbook + ready-to-use message template (downloadable)
+
+### 4) Insights dashboard
+The Insights page visualizes churn trends from the dataset, such as:
+- Churn vs MonthlyCharges (binned)
+- Churn by tenure stage
+- Churn by contract type
+
+### 5) Scoring history
+The app stores scoring activity locally in:
+- `data/history.db`
+
+So you can revisit recent scoring and download history.
 
 ---
 
 ## Key Features
 
-### Prediction
-- **Churn probability prediction** (`predict_proba`)
-- Risk labeling using an adjustable **threshold slider**
-  - **Low Risk**
-  - **At Risk**
-  - **High Risk**
+### ✅ Single Customer Scoring
+From **Score (Single)** page:
+- Manual input form (dropdown + numeric inputs)
+- Paste one customer (1-row CSV with header)
 
-### Web Dashboard (Streamlit)
-Supports:
-- Manual customer input (form)
-- Paste one customer as **1-row CSV**
-- Upload dataset as CSV for **batch scoring**
-- Download scored CSV results
-- Insights dashboard (trends and comparisons)
-- Retention playbook with message templates
+Outputs include:
+- Churn probability (0–1)
+- Risk badge (Low Risk / At Risk / High Risk)
+- Likelihood label
+- Recommended SLA
+- Signals to check (rule-based)
+- Retention playbook + message template + download message as `.txt`
+
+### ✅ Batch Scoring (CSV Upload)
+Upload a CSV dataset and get:
+- `churn_prob` column (predicted churn probability)
+- `churn_pred` column (0/1 based on threshold)
+- Probability distribution chart
+- Download scored CSV
+
+### ✅ Insights Dashboard
+Charts generated from the dataset:
+- Churn rate vs MonthlyCharges
+- Churn rate by tenure
+- Churn by contract type
+
+---
+
+## Risk Policy (Threshold)
+A sidebar slider controls the risk threshold:
+
+- If `churn_prob >= threshold` → **At Risk**
+- If `churn_prob >= threshold + 0.15` → **High Risk**
+- Otherwise → **Low Risk**
+
+This helps you control retention workload:
+- Higher threshold → fewer flagged customers
+- Lower threshold → more flagged customers
 
 ---
 
 ## Tech Stack
-
 - Python
 - Streamlit
 - Pandas / NumPy
 - Scikit-learn (model inference)
-- Plotly (interactive charts)
-- Pickle (loading saved artifacts)
+- Plotly (charts)
 
 ---
 
-## Dataset
+## Project Structure (Recommended)
 
-This project expects the Telco Customer Churn dataset file:
-
-- `data/WA_Fn-UseC_-Telco-Customer-Churn.csv`
-
-The dataset is used for:
-- Dropdown options (categorical fields like Contract, InternetService, etc.)
-- Insights charts (churn trends by tenure, charges, contract type)
-
----
-
-## Model Artifacts
-
-This project expects the trained artifacts inside:
-
-- `artifacts/customer_churn_model.pkl`
-- `artifacts/encoders.pkl`
-
-These are required to:
-- Load the trained churn model
-- Encode categorical values consistently
-- Ensure feature order matches the model’s training feature order
-
----
-
-## Project Structure
-
-project2/
+churn-intelligence/
 │── app.py
 │── requirements.txt
 │── README.md
+│
+├── .streamlit/
+│ └── config.toml
 │
 ├── artifacts/
 │ ├── customer_churn_model.pkl
 │ └── encoders.pkl
 │
-└── data/
-└── WA_Fn-UseC_-Telco-Customer-Churn.csv
+├── data/
+│ ├── WA_Fn-UseC_-Telco-Customer-Churn.csv
+│ └── history.db
+│
+└── src/
+├── preprocess.py
+├── train.py
+└── predict.py
 
+
+> Optional logo  
+> If your app is configured to show a logo, place it here:
+> `assets/logo.png`
 
 ---
 
-## Run the User Interface (Streamlit)
+## Setup & Run (Windows)
 
-### 1) Create and activate a virtual environment (recommended)
-```bash
+### 1) Open terminal in the project folder
+```powershell
+cd C:\Users\swaji\Desktop\project2
+2) Create & activate a virtual environment (recommended)
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-2) Install dependencies
+3) Install dependencies
 python -m pip install -r requirements.txt
-3) Run the application
+4) Run the app
 python -m streamlit run app.py
-Open in browser (if not automatic):
+Input Formats
+A) Paste Single Customer (1-row CSV)
+Paste exactly one row with header.
 
-http://localhost:8501
-
-CSV Input Options
-A) Paste single customer (1-row CSV)
-Paste exactly one row with header, for example:
+Example:
 
 gender,SeniorCitizen,Partner,Dependents,tenure,PhoneService,MultipleLines,InternetService,OnlineSecurity,OnlineBackup,DeviceProtection,TechSupport,StreamingTV,StreamingMovies,Contract,PaperlessBilling,PaymentMethod,MonthlyCharges,TotalCharges
 Female,0,No,No,4,Yes,No,Fiber optic,No,No,No,No,Yes,Yes,Month-to-month,Yes,Electronic check,94.65,378.60
-B) Batch upload CSV
-Upload a CSV containing the same feature columns expected by the model.
-The app also provides a template CSV download in the UI to help create valid input files.
+B) Batch CSV Upload
+Your CSV must contain the same feature columns used during training.
+The app will add:
 
-Risk Threshold (How Customers Are Flagged)
-The sidebar contains a threshold slider:
+churn_prob
 
-If churn_prob >= threshold → customer is flagged At Risk
+churn_pred
 
-If churn_prob >= threshold + 0.15 → customer is flagged High Risk
+If you see “missing required columns”, your CSV headers don’t match the model’s expected features.
 
-Otherwise → Low Risk
+Model Artifacts (How prediction works)
+The app uses:
 
-This lets you control retention workload:
+encoders.pkl to convert categorical values → numeric values
 
-Higher threshold → fewer flagged customers
+the model’s saved feature list to ensure correct column order
 
-Lower threshold → more flagged customers
+predict_proba() to compute churn probability
 
+Training Pipeline (Optional — src/)
+If you want to retrain the model and regenerate artifacts:
+
+src/preprocess.py
+Loads and cleans dataset
+
+Drops customerID
+
+Fixes blanks in TotalCharges and converts to float
+
+Encodes categorical columns
+
+Saves: artifacts/encoders.pkl
+
+src/train.py
+Splits train/test
+
+Applies SMOTE to handle class imbalance
+
+Trains and compares models (e.g., Decision Tree / Random Forest)
+
+Saves: artifacts/customer_churn_model.pkl
+
+src/predict.py
+Example script to run prediction using saved artifacts
+
+If training requires SMOTE and it’s missing:
+
+python -m pip install imbalanced-learn
 Troubleshooting
-1) Dataset not found
-Make sure this exists:
+“streamlit is not recognized”
+Use:
 
-data/WA_Fn-UseC_-Telco-Customer-Churn.csv
-
-2) Artifacts not found
-Make sure these exist:
+python -m streamlit run app.py
+“Model artifacts not found”
+Confirm these exist in your repo and deployment:
 
 artifacts/customer_churn_model.pkl
 
 artifacts/encoders.pkl
 
-3) Streamlit command not recognized
-Use:
+“Dataset not found”
+Confirm:
 
-python -m streamlit run app.py
-4) Missing required columns in CSV upload
-Use the template CSV download button inside the app and fill the values correctly.
+data/WA_Fn-UseC_-Telco-Customer-Churn.csv
 
 Author
 Swajith S S
