@@ -1,0 +1,17 @@
+__pycache__/
+.ipynb_checkpoints/
+artifacts/
+*.pkl
+.env
+.venv/
+venv/
+.env
+streamlit
+pandas
+numpy
+scikit-learn
+imblearn
+plotly
+openai
+python-dotenv
+*.pyc
