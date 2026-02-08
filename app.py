@@ -363,7 +363,13 @@ elif page == "Insights":
             if "MonthlyCharges" in df.columns:
                 bins = np.linspace(df["MonthlyCharges"].min(), df["MonthlyCharges"].max(), 12)
                 df["mc_bin"] = pd.cut(df["MonthlyCharges"], bins=bins, include_lowest=True)
-                t2 = df.groupby("mc_bin")["Churn_bin"].mean()
+
+                # mean churn per bin
+                t2 = df.groupby("mc_bin", observed=True)["Churn_bin"].mean()
+
+                # ✅ FIX: Interval index breaks Streamlit/Altair. Convert to string.
+                t2.index = t2.index.astype(str)
+
                 st.line_chart(t2)
             else:
                 st.info("MonthlyCharges column missing.")
