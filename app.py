@@ -96,19 +96,44 @@ db_init()
 # Cached Loaders (CRITICAL)
 # =========================
 @st.cache_resource
+@st.cache_resource
 def load_artifacts():
     import pickle
 
+    if not MODEL_PATH.exists() or not ENCODERS_PATH.exists():
+        raise FileNotFoundError(
+            "Missing artifacts. Ensure these exist:\n"
+            "- artifacts/customer_churn_model.pkl\n"
+            "- artifacts/encoders.pkl"
+        )
+
     with open(MODEL_PATH, "rb") as f:
         model_data = pickle.load(f)
+
     with open(ENCODERS_PATH, "rb") as f:
         encoders = pickle.load(f)
 
-    model = model_data["model"]
-    features = model_data.get("feature_names") or model_data.get("features")
-    return model, features, encoders
+    model = model_data.get("model")
 
-@st.cache_data
+    # Your pickle may store feature list under different keys
+    features = (
+        model_data.get("features_names")
+        or model_data.get("feature_names")
+        or model_data.get("features")
+    )
+
+    if model is None:
+        raise ValueError(f"'model' key not found in model pickle. Keys: {list(model_data.keys())}")
+
+    if features is None:
+        raise ValueError(
+            "Feature list not found in model pickle. Expected one of: "
+            "'features_names', 'feature_names', 'features'. "
+            f"Available keys: {list(model_data.keys())}"
+        )
+
+    return model, list(features), encoders
+
 def load_dataset(path: str):
     df = pd.read_csv(path)
 
