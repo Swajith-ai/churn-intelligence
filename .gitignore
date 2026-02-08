@@ -19,3 +19,9 @@ python-dotenv
 __pycache__/
 *.pyc
 
+
+project_structure.txt
+notebook/
+__pycache__/
+*.pyc
+
