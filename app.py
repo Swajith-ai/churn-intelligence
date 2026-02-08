@@ -6,243 +6,70 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
-from sklearn.inspection import permutation_importance
-
 
 # =========================
-# Paths
+# Config
 # =========================
-DATA_PATH = Path("data/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+APP_TITLE = "Churn Intelligence"
 ARTIFACTS_DIR = Path("artifacts")
 MODEL_PATH = ARTIFACTS_DIR / "customer_churn_model.pkl"
 ENCODERS_PATH = ARTIFACTS_DIR / "encoders.pkl"
 
-# Optional logo (you can keep/ignore)
-LOGO_PATH = Path("assets/logo.png")
+# IMPORTANT: We do NOT load the big dataset at startup on Streamlit Cloud.
+# Insights will be optional and will only run if the dataset exists.
+DATA_PATH = Path("data/WA_Fn-UseC_-Telco-Customer-Churn.csv")
 
 DB_PATH = Path("data") / "history.db"
-APP_TITLE = "Churn Intelligence"
+LOGO_PATH = Path("assets/logo.png")
 
 
-# =========================
-# Page config
-# =========================
 st.set_page_config(page_title=APP_TITLE, page_icon="📈", layout="wide")
 
 
 # =========================
-# Theme toggle
+# Lightweight Styling
 # =========================
-if "theme_dark" not in st.session_state:
-    st.session_state["theme_dark"] = False
-
-
-def inject_css(dark: bool):
-    if dark:
-        css = """
-        <style>
-          :root { color-scheme: dark; }
-          .block-container { padding-top: 1.2rem; padding-bottom: 2.2rem; max-width: 1220px; }
-          html, body, [class*="css"] { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont; }
-
-          .hero {
-            padding: 18px 18px;
-            border-radius: 18px;
-            background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(14,165,233,0.08));
-            border: 1px solid rgba(148,163,184,0.18);
-            margin-bottom: 14px;
-          }
-          .hero h1 { margin: 0; font-size: 26px; color: #E2E8F0; letter-spacing: -0.2px;}
-          .hero p  { margin: 6px 0 0 0; font-size: 14px; color: rgba(226,232,240,0.74); }
-
-          .panel {
-            background: rgba(2,6,23,0.72);
-            border-radius: 18px;
-            padding: 18px;
-            border: 1px solid rgba(148,163,184,0.16);
-            box-shadow: 0 10px 26px rgba(0,0,0,0.25);
-          }
-
-          .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 14px;
-            border-radius: 999px;
-            font-weight: 800;
-            font-size: 13px;
-            border: 1px solid rgba(148,163,184,0.20);
-          }
-          .badge-high { background: rgba(239,68,68,0.18); color: #FCA5A5; border-color: rgba(239,68,68,0.35); }
-          .badge-mid  { background: rgba(245,158,11,0.18); color: #FCD34D; border-color: rgba(245,158,11,0.35); }
-          .badge-low  { background: rgba(34,197,94,0.18); color: #86EFAC; border-color: rgba(34,197,94,0.35); }
-
-          .note {
-            background: rgba(148,163,184,0.08);
-            border: 1px solid rgba(148,163,184,0.14);
-            border-radius: 16px;
-            padding: 14px 14px;
-            line-height: 1.55;
-            color: rgba(226,232,240,0.86);
-          }
-          .note h4 { margin: 0 0 8px 0; color: #E2E8F0; }
-          .note ul { margin: 8px 0 0 18px; }
-          .note li { margin: 6px 0; }
-
-          div[data-testid="stMetric"] {
-            background: rgba(2,6,23,0.72);
-            padding: 14px;
-            border-radius: 16px;
-            border: 1px solid rgba(148,163,184,0.16);
-            box-shadow: 0 8px 18px rgba(0,0,0,0.22);
-          }
-
-          .stButton button { border-radius: 14px; padding: 0.62rem 1.1rem; font-weight: 800; }
-          .stSelectbox div, .stNumberInput input, textarea { border-radius: 12px !important; }
-          section[data-testid="stSidebar"] { border-right: 1px solid rgba(148,163,184,0.10); }
-        </style>
-        """
-    else:
-        css = """
-        <style>
-          .block-container { padding-top: 1.2rem; padding-bottom: 2.2rem; max-width: 1220px; }
-          html, body, [class*="css"] { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont; }
-
-          .hero {
-            padding: 18px 18px;
-            border-radius: 18px;
-            background: linear-gradient(135deg, rgba(79,70,229,0.10), rgba(14,165,233,0.05));
-            border: 1px solid rgba(2,6,23,0.08);
-            margin-bottom: 14px;
-          }
-          .hero h1 { margin: 0; font-size: 26px; color: #0F172A; letter-spacing: -0.2px;}
-          .hero p  { margin: 6px 0 0 0; font-size: 14px; color: rgba(15,23,42,0.72); }
-
-          .panel {
-            background: #FFFFFF;
-            border-radius: 18px;
-            padding: 18px;
-            border: 1px solid rgba(2,6,23,0.08);
-            box-shadow: 0 10px 26px rgba(2,6,23,0.06);
-          }
-
-          .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 14px;
-            border-radius: 999px;
-            font-weight: 800;
-            font-size: 13px;
-            border: 1px solid rgba(2,6,23,0.12);
-          }
-          .badge-high { background: rgba(239,68,68,0.12); color: #B91C1C; border-color: rgba(239,68,68,0.32); }
-          .badge-mid  { background: rgba(245,158,11,0.14); color: #92400E; border-color: rgba(245,158,11,0.30); }
-          .badge-low  { background: rgba(34,197,94,0.12); color: #047857; border-color: rgba(34,197,94,0.32); }
-
-          .note {
-            background: rgba(15,23,42,0.03);
-            border: 1px solid rgba(2,6,23,0.08);
-            border-radius: 16px;
-            padding: 14px 14px;
-            line-height: 1.55;
-            color: rgba(15,23,42,0.86);
-          }
-          .note h4 { margin: 0 0 8px 0; color: #0F172A; }
-          .note ul { margin: 8px 0 0 18px; }
-          .note li { margin: 6px 0; }
-
-          div[data-testid="stMetric"] {
-            background: #FFFFFF;
-            padding: 14px;
-            border-radius: 16px;
-            border: 1px solid rgba(2,6,23,0.08);
-            box-shadow: 0 8px 18px rgba(2,6,23,0.06);
-          }
-
-          .stButton button { border-radius: 14px; padding: 0.62rem 1.1rem; font-weight: 800; }
-          .stSelectbox div, .stNumberInput input, textarea { border-radius: 12px !important; }
-          section[data-testid="stSidebar"] { border-right: 1px solid rgba(2,6,23,0.06); }
-        </style>
-        """
-    st.markdown(css, unsafe_allow_html=True)
-
-
-def explain_box(title: str, points: list[str]) -> str:
-    lis = "".join([f"<li>{p}</li>" for p in points])
-    return f"""
-    <div class="note">
-      <h4>{title}</h4>
-      <ul>{lis}</ul>
-    </div>
+st.markdown(
     """
+<style>
+.block-container { max-width: 1200px; padding-top: 1.1rem; padding-bottom: 2rem; }
+.hero {
+  padding: 16px 18px; border-radius: 18px;
+  background: linear-gradient(135deg, rgba(79,70,229,0.10), rgba(14,165,233,0.05));
+  border: 1px solid rgba(2,6,23,0.08); margin-bottom: 12px;
+}
+.hero h1 { margin:0; font-size: 26px; color:#0F172A; letter-spacing: -0.2px; }
+.hero p { margin:6px 0 0 0; font-size:14px; color: rgba(15,23,42,0.72); }
+.panel {
+  background:#fff; border-radius:18px; padding:18px;
+  border:1px solid rgba(2,6,23,0.08); box-shadow: 0 10px 26px rgba(2,6,23,0.06);
+}
+.badge { display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border-radius:999px;
+  font-weight:800; font-size:13px; border:1px solid rgba(2,6,23,0.12); }
+.badge-high { background: rgba(239,68,68,0.12); color:#B91C1C; border-color: rgba(239,68,68,0.32); }
+.badge-mid  { background: rgba(245,158,11,0.14); color:#92400E; border-color: rgba(245,158,11,0.30); }
+.badge-low  { background: rgba(34,197,94,0.12); color:#047857; border-color: rgba(34,197,94,0.32); }
+.small { color: rgba(15,23,42,0.70); font-size: 13px; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-
-def make_layout(fig, height=520, title=None):
-    fig.update_layout(
-        template="plotly_white",
-        height=height,
-        margin=dict(l=10, r=10, t=56, b=10),
-        font=dict(family="Inter, system-ui", size=13),
-        title=dict(text=title or fig.layout.title.text, x=0.01, xanchor="left"),
-        hovermode="x unified",
-    )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(2,6,23,0.06)")
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(2,6,23,0.06)")
-    return fig
-
-
-def make_gauge(prob: float, threshold: float):
-    fig = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=prob,
-            number={"valueformat": ".3f"},
-            gauge={
-                "axis": {"range": [0, 1]},
-                "bar": {"color": "rgba(79,70,229,0.78)"},
-                "threshold": {"line": {"color": "rgba(239,68,68,0.85)", "width": 4}, "value": threshold},
-            },
-        )
-    )
-    fig.update_layout(template="plotly_white", height=320, margin=dict(l=10, r=10, t=10, b=10))
-    return fig
-
-
-def likelihood_label(prob: float) -> str:
-    if prob >= 0.80:
-        return "Very likely"
-    if prob >= 0.60:
-        return "Likely"
-    if prob >= 0.40:
-        return "Uncertain"
-    if prob >= 0.20:
-        return "Unlikely"
-    return "Very unlikely"
-
-
-def risk_badge(prob: float, threshold: float):
-    if prob >= threshold + 0.15:
-        return "High Risk", "badge badge-high"
-    if prob >= threshold:
-        return "At Risk", "badge badge-mid"
-    return "Low Risk", "badge badge-low"
-
-
-def sla_recommendation(prob: float, threshold: float) -> str:
-    if prob >= threshold + 0.15:
-        return "contact within 2–6 hours"
-    if prob >= threshold:
-        return "contact within 24–48 hours"
-    return "normal monitoring"
+st.markdown(
+    f"""
+<div class="hero">
+  <h1>{APP_TITLE}</h1>
+  <p>Memory-safe churn scoring dashboard — single scoring, batch scoring, and playbooks.</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 
 # =========================
-# DB: History
+# DB (History)
 # =========================
 def db_connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -299,20 +126,23 @@ def db_read(limit: int = 500) -> pd.DataFrame:
     return df.drop(columns=["payload_json"])
 
 
-# =========================
-# Data/Model loading
-# =========================
-@st.cache_data
-def load_raw():
-    df = pd.read_csv(DATA_PATH)
-    if "TotalCharges" in df.columns:
-        df["TotalCharges"] = df["TotalCharges"].astype(str).str.strip().replace({"": "0.0", " ": "0.0"}).astype(float)
-    return df
+db_init()
 
 
+# =========================
+# Load artifacts (cached resource)
+# =========================
 @st.cache_resource
 def load_artifacts():
     import pickle
+
+    if not MODEL_PATH.exists() or not ENCODERS_PATH.exists():
+        raise FileNotFoundError(
+            "Model artifacts not found. Required:\n"
+            "- artifacts/customer_churn_model.pkl\n"
+            "- artifacts/encoders.pkl"
+        )
+
     with open(MODEL_PATH, "rb") as f:
         model_data = pickle.load(f)
     with open(ENCODERS_PATH, "rb") as f:
@@ -320,19 +150,11 @@ def load_artifacts():
 
     model = model_data.get("model")
     feature_names = model_data.get("features_names") or model_data.get("feature_names") or model_data.get("features")
+
     if model is None or feature_names is None:
         raise ValueError("Model file must contain: 'model' and feature list (features_names/feature_names/features).")
 
-    return model, feature_names, encoders
-
-
-def add_churn_bin(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    if "Churn" in out.columns and out["Churn"].dtype == object:
-        out["Churn_bin"] = out["Churn"].replace({"Yes": 1, "No": 0})
-    else:
-        out["Churn_bin"] = out.get("Churn", 0)
-    return out
+    return model, list(feature_names), encoders
 
 
 def safe_label_transform(le, values: pd.Series) -> np.ndarray:
@@ -343,6 +165,7 @@ def safe_label_transform(le, values: pd.Series) -> np.ndarray:
 
 
 def encode_and_order(df: pd.DataFrame, feature_names, encoders) -> pd.DataFrame:
+    # Encode categorical columns using encoders
     for col, le in encoders.items():
         if col in df.columns:
             df[col] = safe_label_transform(le, df[col])
@@ -354,61 +177,46 @@ def encode_and_order(df: pd.DataFrame, feature_names, encoders) -> pd.DataFrame:
     return df[feature_names]
 
 
-def predict_prob(model, feature_names, encoders, input_dict):
+def predict_prob(model, feature_names, encoders, input_dict: dict) -> float:
     df = pd.DataFrame([input_dict])
+
+    # TotalCharges cleanup if present
+    if "TotalCharges" in df.columns:
+        df["TotalCharges"] = (
+            df["TotalCharges"].astype(str).str.strip().replace({"": "0.0", " ": "0.0"}).astype(float)
+        )
+
     df_enc = encode_and_order(df, feature_names, encoders)
     prob = float(model.predict_proba(df_enc)[0][1])
     return prob
 
 
-# =========================
-# MEMORY-SAFE importance (ON-DEMAND ONLY)
-# =========================
-def compute_global_importance(raw_df: pd.DataFrame, model, feature_names, encoders, sample_n: int = 200):
-    """
-    IMPORTANT:
-    - This is intentionally NOT cached and NOT run at startup.
-    - Uses small sample and single-thread to avoid Streamlit Cloud memory limit.
-    """
-    df = raw_df.copy()
+def likelihood_label(prob: float) -> str:
+    if prob >= 0.80:
+        return "Very likely"
+    if prob >= 0.60:
+        return "Likely"
+    if prob >= 0.40:
+        return "Uncertain"
+    if prob >= 0.20:
+        return "Unlikely"
+    return "Very unlikely"
 
-    if "customerID" in df.columns:
-        df = df.drop(columns=["customerID"])
 
-    if "Churn" in df.columns:
-        y = df["Churn"].replace({"Yes": 1, "No": 0})
-        X = df.drop(columns=["Churn"])
-    elif "Churn_bin" in df.columns:
-        y = df["Churn_bin"]
-        X = df.drop(columns=["Churn_bin"])
-    else:
-        return pd.DataFrame(columns=["feature", "importance"])
+def risk_badge(prob: float, threshold: float):
+    if prob >= threshold + 0.15:
+        return "High Risk", "badge badge-high"
+    if prob >= threshold:
+        return "At Risk", "badge badge-mid"
+    return "Low Risk", "badge badge-low"
 
-    if "TotalCharges" in X.columns:
-        X["TotalCharges"] = (
-            X["TotalCharges"]
-            .astype(str)
-            .str.strip()
-            .replace({"": "0.0", " ": "0.0"})
-            .astype(float)
-        )
 
-    if len(X) > sample_n:
-        X = X.sample(sample_n, random_state=42)
-        y = y.loc[X.index]
-
-    X_enc = encode_and_order(X.copy(), feature_names, encoders)
-
-    r = permutation_importance(
-        model,
-        X_enc,
-        y,
-        n_repeats=2,      # smaller = lighter
-        random_state=42,
-        n_jobs=1          # IMPORTANT: single-thread reduces memory spikes
-    )
-    imp = pd.DataFrame({"feature": feature_names, "importance": r.importances_mean})
-    return imp.sort_values("importance", ascending=False)
+def sla_recommendation(prob: float, threshold: float) -> str:
+    if prob >= threshold + 0.15:
+        return "contact within 2–6 hours"
+    if prob >= threshold:
+        return "contact within 24–48 hours"
+    return "normal monitoring"
 
 
 def build_signals(inp: dict) -> list[str]:
@@ -441,8 +249,8 @@ def build_signals(inp: dict) -> list[str]:
     return signals
 
 
-def playbook_text(badge: str) -> dict:
-    if badge == "High Risk":
+def playbook_text(level: str) -> dict:
+    if level == "High Risk":
         return {
             "title": "Retention Playbook (High Risk)",
             "steps": [
@@ -459,13 +267,13 @@ def playbook_text(badge: str) -> dict:
                 "Thanks,\nSupport Team"
             ),
         }
-    if badge == "At Risk":
+    if level == "At Risk":
         return {
             "title": "Retention Playbook (At Risk)",
             "steps": [
                 "Contact within 24–48 hours.",
-                "Check plan fit and billing clarity (avoid surprises).",
-                "Offer a small value reinforcement (trial add-on / plan optimization / loyalty perk).",
+                "Check plan fit and billing clarity.",
+                "Offer value reinforcement (trial add-on / plan optimization / loyalty perk).",
             ],
             "template": (
                 "Hi {name},\n\n"
@@ -490,141 +298,165 @@ def playbook_text(badge: str) -> dict:
     }
 
 
-def churn_rate_by_bins(df, x_col, bins):
-    temp = df[[x_col, "Churn_bin"]].dropna().copy()
-    temp["bin"] = pd.cut(temp[x_col], bins=bins, include_lowest=True)
-    grp = temp.groupby("bin")["Churn_bin"].mean().reset_index()
-    grp["bin_label"] = grp["bin"].astype(str)
-    return grp[["bin_label", "Churn_bin"]]
-
-
 # =========================
-# Startup checks
+# Sidebar
 # =========================
-if not DATA_PATH.exists():
-    st.error("Dataset not found. Put it here: `data/WA_Fn-UseC_-Telco-Customer-Churn.csv`")
-    st.stop()
-
-if not MODEL_PATH.exists() or not ENCODERS_PATH.exists():
-    st.error("Model artifacts not found. Required:\n- artifacts/customer_churn_model.pkl\n- artifacts/encoders.pkl")
-    st.stop()
-
-db_init()
-
-st.sidebar.markdown("## 🎛️ Appearance")
-st.session_state["theme_dark"] = st.sidebar.toggle("Dark mode", value=st.session_state["theme_dark"])
-inject_css(st.session_state["theme_dark"])
-
 if LOGO_PATH.exists():
     st.sidebar.image(str(LOGO_PATH), use_container_width=True)
 
 st.sidebar.markdown("## 🧭 Navigation")
 page = st.sidebar.radio(
     "Go to",
-    ["Home", "Score (Single)", "Batch Scoring", "Insights", "Playbook", "History"],
+    ["Home", "Score (Single)", "Batch Scoring", "Insights (Optional)", "History"],
     label_visibility="collapsed",
 )
 
 st.sidebar.divider()
 st.sidebar.markdown("## ⚙️ Risk Policy")
 threshold = st.sidebar.slider("High-risk threshold", 0.05, 0.95, 0.50, 0.01)
-st.sidebar.caption("Probability ≥ threshold → flagged for retention")
+st.sidebar.caption("Probability ≥ threshold → flagged")
 
-if "last_scored" not in st.session_state:
-    st.session_state["last_scored"] = None
 
-with st.spinner("Loading app assets..."):
-    raw_df = load_raw()
-    df_i = add_churn_bin(raw_df)
+# =========================
+# Load model + encoders only (no dataset at startup)
+# =========================
+try:
     model, feature_names, encoders = load_artifacts()
+except Exception as e:
+    st.error("Failed to load model artifacts.")
+    st.code(str(e))
+    st.stop()
 
-cat_cols = raw_df.select_dtypes(include="object").columns.tolist()
-if "customerID" in cat_cols:
-    cat_cols.remove("customerID")
-cat_options = {c: sorted(raw_df[c].dropna().unique().tolist()) for c in cat_cols}
-
-st.markdown(
-    f"""
-    <div class="hero">
-      <h1>{APP_TITLE}</h1>
-      <p>Product-grade churn scoring — single scoring, batch scoring, insights and playbooks.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# Build dropdown options from encoder classes (no dataset needed)
+def opt(col: str):
+    le = encoders.get(col)
+    if le is None:
+        return []
+    return list(le.classes_)
 
 
-def render_decision(inp: dict, prob: float):
+# =========================
+# Pages
+# =========================
+def render_home():
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("Overview")
+    st.write("Use the sidebar to score customers or upload a CSV for batch scoring.")
+
+    hist = db_read(500)
+    if hist.empty:
+        st.info("No scoring history yet.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    total = len(hist)
+    flagged = int(hist["risk_label"].isin(["At Risk", "High Risk"]).sum())
+    high = int((hist["risk_label"] == "High Risk").sum())
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total scored", total)
+    c2.metric("Flagged", flagged)
+    c3.metric("High Risk", high)
+
+    st.markdown("#### Recent scoring")
+    st.dataframe(hist.head(30), use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def score_manual():
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("Score a customer — Manual input")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        gender = st.selectbox("gender", opt("gender"))
+        SeniorCitizen = st.number_input("SeniorCitizen (0/1)", 0, 1, 0, 1)
+        Partner = st.selectbox("Partner", opt("Partner"))
+        Dependents = st.selectbox("Dependents", opt("Dependents"))
+    with c2:
+        Contract = st.selectbox("Contract", opt("Contract"))
+        tenure = st.number_input("tenure (months)", 0, 1000, 12, 1)
+        PaperlessBilling = st.selectbox("PaperlessBilling", opt("PaperlessBilling"))
+        PaymentMethod = st.selectbox("PaymentMethod", opt("PaymentMethod"))
+    with c3:
+        InternetService = st.selectbox("InternetService", opt("InternetService"))
+        PhoneService = st.selectbox("PhoneService", opt("PhoneService"))
+        MultipleLines = st.selectbox("MultipleLines", opt("MultipleLines"))
+        MonthlyCharges = st.number_input("MonthlyCharges", 0.0, 1000.0, 70.0, 1.0)
+
+    TotalCharges = st.number_input("TotalCharges", 0.0, 1_000_000.0, 800.0, 10.0)
+
+    with st.expander("Advanced: add-on services"):
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            OnlineSecurity = st.selectbox("OnlineSecurity", opt("OnlineSecurity"))
+            OnlineBackup = st.selectbox("OnlineBackup", opt("OnlineBackup"))
+        with a2:
+            DeviceProtection = st.selectbox("DeviceProtection", opt("DeviceProtection"))
+            TechSupport = st.selectbox("TechSupport", opt("TechSupport"))
+        with a3:
+            StreamingTV = st.selectbox("StreamingTV", opt("StreamingTV"))
+            StreamingMovies = st.selectbox("StreamingMovies", opt("StreamingMovies"))
+
+    run = st.button("Score customer", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if not run:
+        return
+
+    inp = {
+        "gender": gender,
+        "SeniorCitizen": int(SeniorCitizen),
+        "Partner": Partner,
+        "Dependents": Dependents,
+        "tenure": int(tenure),
+        "PhoneService": PhoneService,
+        "MultipleLines": MultipleLines,
+        "InternetService": InternetService,
+        "OnlineSecurity": OnlineSecurity,
+        "OnlineBackup": OnlineBackup,
+        "DeviceProtection": DeviceProtection,
+        "TechSupport": TechSupport,
+        "StreamingTV": StreamingTV,
+        "StreamingMovies": StreamingMovies,
+        "Contract": Contract,
+        "PaperlessBilling": PaperlessBilling,
+        "PaymentMethod": PaymentMethod,
+        "MonthlyCharges": float(MonthlyCharges),
+        "TotalCharges": float(TotalCharges),
+    }
+
+    prob = predict_prob(model, feature_names, encoders, inp)
     label, css = risk_badge(prob, threshold)
     sla = sla_recommendation(prob, threshold)
     signals = build_signals(inp)
 
+    db_insert("single_manual", prob, label, threshold, inp)
+
     st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.markdown(f'<span class="{css}">{label}</span>', unsafe_allow_html=True)
+    st.markdown("### Decision Summary")
+    st.write(f"**Churn probability:** `{prob:.3f}`")
+    st.write(f"**Likelihood:** `{likelihood_label(prob)}`")
+    st.write(f"**Policy threshold:** `{threshold:.2f}`")
+    st.write(f"**Recommended SLA:** `{sla}`")
 
-    colA, colB = st.columns([1.2, 1.0], vertical_alignment="top")
-    with colA:
-        st.markdown(f'<span class="{css}">{label}</span>', unsafe_allow_html=True)
-        st.markdown("### Decision Summary")
-        st.caption("Use this to prioritize retention workflows.")
-    with colB:
-        st.plotly_chart(make_gauge(prob, threshold), use_container_width=True)
+    st.markdown("#### Signals to check")
+    for s in signals:
+        st.write(f"- {s}")
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Churn probability", f"{prob:.3f}")
-    m2.metric("Likelihood", likelihood_label(prob))
-    m3.metric("Policy threshold", f"{threshold:.2f}")
-    m4.metric("Recommended SLA", sla)
-
-    st.markdown(explain_box("Signals to check", signals), unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-    return label
-
-
-def render_explainability():
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.subheader("Explainability (Global drivers)")
-
-    st.caption("To avoid Streamlit Cloud memory limits, global importance is computed only when you turn it ON.")
-    compute = st.toggle("Compute global importance (slower)", value=False)
-    if not compute:
-        st.info("Toggle ON to compute top global drivers (uses small sample to stay memory-safe).")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    with st.spinner("Computing global importance (memory-safe mode)..."):
-        try:
-            global_imp = compute_global_importance(raw_df, model, feature_names, encoders, sample_n=200)
-        except Exception as e:
-            st.error("Failed to compute importance.")
-            st.code(str(e))
-            st.markdown("</div>", unsafe_allow_html=True)
-            return
-
-    if global_imp is not None and not global_imp.empty:
-        top = global_imp.head(12)
-        fig = px.bar(top, x="importance", y="feature", orientation="h", title="Top global drivers (permutation importance)")
-        fig.update_layout(template="plotly_white", height=420, margin=dict(l=10, r=10, t=56, b=10))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Global importance not available for this model/dataset.")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def render_playbook(label: str):
     pb = playbook_text(label)
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.subheader(pb["title"])
-    st.markdown(explain_box("Recommended steps", pb["steps"]), unsafe_allow_html=True)
+    st.markdown(f"### {pb['title']}")
+    for s in pb["steps"]:
+        st.write(f"- {s}")
 
-    st.markdown("### Ready-to-use message template")
     name = st.text_input("Customer name (optional)", value="Customer")
-    filled = pb["template"].replace("{name}", name)
-    st.text_area("Copy/paste this", value=filled, height=210)
+    message = pb["template"].replace("{name}", name)
+    st.text_area("Copy/paste message", value=message, height=190)
 
     st.download_button(
-        "⬇️ Download message as .txt",
-        data=filled.encode("utf-8"),
+        "⬇️ Download message (.txt)",
+        data=message.encode("utf-8"),
         file_name="retention_message.txt",
         mime="text/plain",
         use_container_width=True,
@@ -632,72 +464,9 @@ def render_playbook(label: str):
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def manual_form():
-    with st.form("manual_form", clear_on_submit=False):
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.subheader("Customer profile")
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            gender = st.selectbox("Gender", cat_options["gender"])
-            senior = st.number_input("SeniorCitizen (0/1)", 0, 1, 0, 1)
-            partner = st.selectbox("Partner", cat_options["Partner"])
-            dependents = st.selectbox("Dependents", cat_options["Dependents"])
-        with c2:
-            contract = st.selectbox("Contract", cat_options["Contract"])
-            tenure = st.number_input("Tenure (months)", 0, 1000, 12, 1)
-            paperless = st.selectbox("PaperlessBilling", cat_options["PaperlessBilling"])
-            payment = st.selectbox("PaymentMethod", cat_options["PaymentMethod"])
-        with c3:
-            internet = st.selectbox("InternetService", cat_options["InternetService"])
-            phone = st.selectbox("PhoneService", cat_options["PhoneService"])
-            multiple = st.selectbox("MultipleLines", cat_options["MultipleLines"])
-            monthly = st.number_input("MonthlyCharges", 0.0, 1000.0, 70.0, 1.0)
-
-        total = st.number_input("TotalCharges", 0.0, 1_000_000.0, 800.0, 10.0)
-
-        with st.expander("Advanced: add-on services", expanded=False):
-            a1, a2, a3 = st.columns(3)
-            with a1:
-                online_security = st.selectbox("OnlineSecurity", cat_options["OnlineSecurity"])
-                online_backup = st.selectbox("OnlineBackup", cat_options["OnlineBackup"])
-            with a2:
-                device_protection = st.selectbox("DeviceProtection", cat_options["DeviceProtection"])
-                tech_support = st.selectbox("TechSupport", cat_options["TechSupport"])
-            with a3:
-                streaming_tv = st.selectbox("StreamingTV", cat_options["StreamingTV"])
-                streaming_movies = st.selectbox("StreamingMovies", cat_options["StreamingMovies"])
-
-        submitted = st.form_submit_button("Score customer", use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    inp = {
-        "gender": gender,
-        "SeniorCitizen": int(senior),
-        "Partner": partner,
-        "Dependents": dependents,
-        "tenure": int(tenure),
-        "PhoneService": phone,
-        "MultipleLines": multiple,
-        "InternetService": internet,
-        "OnlineSecurity": online_security,
-        "OnlineBackup": online_backup,
-        "DeviceProtection": device_protection,
-        "TechSupport": tech_support,
-        "StreamingTV": streaming_tv,
-        "StreamingMovies": streaming_movies,
-        "Contract": contract,
-        "PaperlessBilling": paperless,
-        "PaymentMethod": payment,
-        "MonthlyCharges": float(monthly),
-        "TotalCharges": float(total),
-    }
-    return submitted, inp
-
-
-def paste_one():
+def score_paste_one():
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.subheader("Paste one customer (fast)")
+    st.subheader("Score a customer — Paste one row (CSV)")
 
     sample = (
         "gender,SeniorCitizen,Partner,Dependents,tenure,PhoneService,MultipleLines,InternetService,"
@@ -706,36 +475,73 @@ def paste_one():
         "Female,0,No,No,4,Yes,No,Fiber optic,No,No,No,No,Yes,Yes,Month-to-month,"
         "Yes,Electronic check,94.65,378.60"
     )
-
-    pasted = st.text_area("Paste 1-row CSV (with header)", height=160, value=sample)
+    text = st.text_area("Paste 1-row CSV with header", height=160, value=sample)
     run = st.button("Score pasted customer", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     if not run:
-        return False, None
+        return
 
     try:
-        df = pd.read_csv(StringIO(pasted))
+        df = pd.read_csv(StringIO(text))
         if df.shape[0] != 1:
             st.error("Paste exactly ONE row.")
-            return False, None
-        return True, df.iloc[0].to_dict()
+            return
+        inp = df.iloc[0].to_dict()
+        prob = predict_prob(model, feature_names, encoders, inp)
     except Exception as e:
-        st.error("Invalid CSV format.")
+        st.error("Invalid CSV.")
         st.code(str(e))
-        return False, None
+        return
 
+    label, css = risk_badge(prob, threshold)
+    sla = sla_recommendation(prob, threshold)
+    signals = build_signals(inp)
 
-def batch_upload():
+    db_insert("single_paste", prob, label, threshold, inp)
+
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.subheader("Upload CSV (batch scoring)")
+    st.markdown(f'<span class="{css}">{label}</span>', unsafe_allow_html=True)
+    st.markdown("### Decision Summary")
+    st.write(f"**Churn probability:** `{prob:.3f}`")
+    st.write(f"**Likelihood:** `{likelihood_label(prob)}`")
+    st.write(f"**Recommended SLA:** `{sla}`")
+
+    st.markdown("#### Signals to check")
+    for s in signals:
+        st.write(f"- {s}")
+
+    pb = playbook_text(label)
+    st.markdown(f"### {pb['title']}")
+    for s in pb["steps"]:
+        st.write(f"- {s}")
+
+    name = st.text_input("Customer name (optional)", value="Customer")
+    message = pb["template"].replace("{name}", name)
+    st.text_area("Copy/paste message", value=message, height=190)
+
+    st.download_button(
+        "⬇️ Download message (.txt)",
+        data=message.encode("utf-8"),
+        file_name="retention_message.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def batch_scoring():
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("Batch scoring — Upload CSV")
+
+    st.caption("Memory-safe mode: limits the number of rows processed on Streamlit Cloud.")
+    max_rows = st.number_input("Max rows to process (safety limit)", 1000, 200000, 50000, 1000)
 
     up = st.file_uploader("Upload CSV", type=["csv"])
-
-    template_df = pd.DataFrame([{c: "" for c in feature_names}])
+    template = pd.DataFrame([{c: "" for c in feature_names}])
     st.download_button(
         "⬇️ Download template CSV",
-        data=template_df.to_csv(index=False).encode("utf-8"),
+        data=template.to_csv(index=False).encode("utf-8"),
         file_name="churn_template.csv",
         mime="text/csv",
         use_container_width=True,
@@ -743,27 +549,29 @@ def batch_upload():
     st.markdown("</div>", unsafe_allow_html=True)
 
     if up is None:
-        return None
+        return
 
-    df = pd.read_csv(up)
+    # Read only up to max_rows to prevent memory crashes
+    try:
+        df = pd.read_csv(up, nrows=int(max_rows))
+    except Exception as e:
+        st.error("Could not read CSV.")
+        st.code(str(e))
+        return
 
     if "customerID" in df.columns:
         df = df.drop(columns=["customerID"])
 
     if "TotalCharges" in df.columns:
         df["TotalCharges"] = (
-            df["TotalCharges"]
-            .astype(str)
-            .str.strip()
-            .replace({"": "0.0", " ": "0.0"})
-            .astype(float)
+            df["TotalCharges"].astype(str).str.strip().replace({"": "0.0", " ": "0.0"}).astype(float)
         )
 
     missing = [c for c in feature_names if c not in df.columns]
     if missing:
         st.error("CSV missing required columns:")
         st.code(str(missing))
-        return None
+        return
 
     df_enc = encode_and_order(df.copy(), feature_names, encoders)
     probs = model.predict_proba(df_enc)[:, 1].astype(float)
@@ -772,37 +580,77 @@ def batch_upload():
     out = df.copy()
     out["churn_prob"] = probs
     out["churn_pred"] = preds
-    return out
-
-
-def render_home():
-    st.markdown("## Home / Overview")
-    hist = db_read(limit=500)
-
-    if hist.empty:
-        st.info("No scoring history yet. Start by scoring a customer.")
-        return
-
-    total_scored = len(hist)
-    flagged = int(hist["risk_label"].isin(["At Risk", "High Risk"]).sum())
-    high = int((hist["risk_label"] == "High Risk").sum())
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total scored", total_scored)
-    c2.metric("Flagged", flagged)
-    c3.metric("High Risk", high)
 
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.subheader("Recent activity")
-    st.dataframe(hist.head(30), use_container_width=True)
+    st.subheader("Results (Top 50 by risk)")
+    st.write(f"<span class='small'>Scored rows: {len(out)} | Flagged: {(out['churn_pred']==1).sum()}</span>", unsafe_allow_html=True)
+
+    top = out.sort_values("churn_prob", ascending=False).head(50)
+    st.dataframe(top, use_container_width=True)
+
+    st.download_button(
+        "⬇️ Download scored CSV",
+        data=out.to_csv(index=False).encode("utf-8"),
+        file_name="churn_scored.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_history():
-    st.markdown("## History")
-    hist = db_read(limit=1000)
+def insights_optional():
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("Insights (Optional)")
+    st.caption("This page loads the dataset and can use more memory. Turn it on only if needed.")
+
+    if not DATA_PATH.exists():
+        st.info("Dataset not found in `data/`. Insights are disabled on this deployment.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    load = st.toggle("Load dataset & show insights", value=False)
+    if not load:
+        st.info("Toggle ON to load dataset and render charts.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Load dataset only when toggled ON
+    df = pd.read_csv(DATA_PATH)
+    if "TotalCharges" in df.columns:
+        df["TotalCharges"] = df["TotalCharges"].astype(str).str.strip().replace({"": "0.0", " ": "0.0"}).astype(float)
+
+    if "Churn" in df.columns:
+        df["Churn_bin"] = df["Churn"].replace({"Yes": 1, "No": 0})
+    else:
+        df["Churn_bin"] = 0
 
     st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("Churn rate by Contract")
+    if "Contract" in df.columns:
+        t = df.groupby("Contract")["Churn_bin"].mean().sort_values(ascending=False)
+        st.bar_chart(t)
+    else:
+        st.info("Contract column not available.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("Churn rate vs MonthlyCharges (binned)")
+    if "MonthlyCharges" in df.columns:
+        bins = np.linspace(df["MonthlyCharges"].min(), df["MonthlyCharges"].max(), 12)
+        df["mc_bin"] = pd.cut(df["MonthlyCharges"], bins=bins, include_lowest=True)
+        t2 = df.groupby("mc_bin")["Churn_bin"].mean()
+        st.line_chart(t2)
+    else:
+        st.info("MonthlyCharges column not available.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def history_page():
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("History")
+    hist = db_read(1000)
     if hist.empty:
         st.info("No history yet.")
     else:
@@ -817,108 +665,22 @@ def render_history():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_insights():
-    st.markdown("## Insights Dashboard")
-
-    bins_mc = np.linspace(df_i["MonthlyCharges"].min(), df_i["MonthlyCharges"].max(), 12)
-    mc_trend = churn_rate_by_bins(df_i, "MonthlyCharges", bins_mc)
-    fig1 = px.line(mc_trend, x="bin_label", y="Churn_bin", markers=True,
-                   title="Churn rate vs MonthlyCharges (binned)")
-    st.plotly_chart(make_layout(fig1), use_container_width=True)
-
-    bins_t = np.array([0, 3, 6, 12, 24, 36, 48, 60, 72, 1000])
-    t_trend = churn_rate_by_bins(df_i, "tenure", bins_t)
-    fig2 = px.bar(t_trend, x="bin_label", y="Churn_bin",
-                  title="Churn rate by tenure stage")
-    st.plotly_chart(make_layout(fig2), use_container_width=True)
-
-    contract_churn = (
-        df_i.groupby("Contract")["Churn_bin"]
-        .mean()
-        .sort_values(ascending=False)
-        .reset_index()
-    )
-    fig3 = px.bar(contract_churn, x="Contract", y="Churn_bin",
-                  title="Average churn rate by contract type")
-    st.plotly_chart(make_layout(fig3, 460), use_container_width=True)
-
-
-# =========================
-# Navigation Router
-# =========================
+# Router
 if page == "Home":
     render_home()
 
 elif page == "Score (Single)":
-    st.markdown("### Score customer")
-    tabs = st.tabs(["Manual input", "Paste single customer", "Upload CSV (batch)"])
-
+    tabs = st.tabs(["Manual input", "Paste single customer"])
     with tabs[0]:
-        run, inp = manual_form()
-        if run:
-            prob = predict_prob(model, feature_names, encoders, inp)
-            label, _ = risk_badge(prob, threshold)
-            st.session_state["last_scored"] = ("single_manual", inp, prob, label)
-            db_insert("single_manual", prob, label, threshold, inp)
-
+        score_manual()
     with tabs[1]:
-        run, inp = paste_one()
-        if run and inp is not None:
-            prob = predict_prob(model, feature_names, encoders, inp)
-            label, _ = risk_badge(prob, threshold)
-            st.session_state["last_scored"] = ("single_paste", inp, prob, label)
-            db_insert("single_paste", prob, label, threshold, inp)
-
-    with tabs[2]:
-        out = batch_upload()
-        if out is not None:
-            st.markdown('<div class="panel">', unsafe_allow_html=True)
-            st.subheader("Batch results")
-
-            total = len(out)
-            flagged = int((out["churn_prob"] >= threshold).sum())
-
-            a, b, c = st.columns(3)
-            a.metric("Rows scored", total)
-            b.metric("Flagged", flagged)
-            c.metric("Not flagged", total - flagged)
-
-            top_view = out.sort_values("churn_prob", ascending=False).head(50)
-            st.dataframe(top_view, use_container_width=True)
-
-            st.download_button(
-                "⬇️ Download scored CSV",
-                data=out.to_csv(index=False).encode("utf-8"),
-                file_name="churn_scored.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    if st.session_state["last_scored"] is not None:
-        _, inp, prob, _ = st.session_state["last_scored"]
-        decision = render_decision(inp, prob)
-        render_explainability()
-        render_playbook(decision)
+        score_paste_one()
 
 elif page == "Batch Scoring":
-    out = batch_upload()
-    if out is not None:
-        st.dataframe(out.sort_values("churn_prob", ascending=False).head(100),
-                     use_container_width=True)
+    batch_scoring()
 
-elif page == "Insights":
-    render_insights()
-
-elif page == "Playbook":
-    if st.session_state["last_scored"] is None:
-        st.info("Score a customer first to see the playbook.")
-    else:
-        _, inp, prob, _ = st.session_state["last_scored"]
-        decision = render_decision(inp, prob)
-        render_explainability()
-        render_playbook(decision)
+elif page == "Insights (Optional)":
+    insights_optional()
 
 elif page == "History":
-    render_history()
-
+    history_page()
