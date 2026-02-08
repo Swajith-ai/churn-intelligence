@@ -15,3 +15,7 @@ plotly
 openai
 python-dotenv
 *.pyc
+.venv/
+__pycache__/
+*.pyc
+
