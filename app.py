@@ -21,9 +21,10 @@ ARTIFACTS_DIR = Path("artifacts")
 MODEL_PATH = ARTIFACTS_DIR / "customer_churn_model.pkl"
 ENCODERS_PATH = ARTIFACTS_DIR / "encoders.pkl"
 
-LOGO_PATH = Path("assets/logo.png")  # optional logo
-DB_PATH = Path("data") / "history.db"
+# Optional logo (you can keep/ignore)
+LOGO_PATH = Path("assets/logo.png")
 
+DB_PATH = Path("data") / "history.db"
 APP_TITLE = "Churn Intelligence"
 
 
@@ -34,7 +35,7 @@ st.set_page_config(page_title=APP_TITLE, page_icon="📈", layout="wide")
 
 
 # =========================
-# Theme Toggle (Light/Dark)
+# Theme toggle
 # =========================
 if "theme_dark" not in st.session_state:
     st.session_state["theme_dark"] = False
@@ -360,9 +361,17 @@ def predict_prob(model, feature_names, encoders, input_dict):
     return prob
 
 
-# ✅ FINAL FIX: no caching here → no hashing issues at all
-def compute_global_importance(raw_df: pd.DataFrame, model, feature_names, encoders, sample_n: int = 800):
+# =========================
+# MEMORY-SAFE importance (ON-DEMAND ONLY)
+# =========================
+def compute_global_importance(raw_df: pd.DataFrame, model, feature_names, encoders, sample_n: int = 200):
+    """
+    IMPORTANT:
+    - This is intentionally NOT cached and NOT run at startup.
+    - Uses small sample and single-thread to avoid Streamlit Cloud memory limit.
+    """
     df = raw_df.copy()
+
     if "customerID" in df.columns:
         df = df.drop(columns=["customerID"])
 
@@ -390,12 +399,16 @@ def compute_global_importance(raw_df: pd.DataFrame, model, feature_names, encode
 
     X_enc = encode_and_order(X.copy(), feature_names, encoders)
 
-    try:
-        r = permutation_importance(model, X_enc, y, n_repeats=4, random_state=42, n_jobs=-1)
-        imp = pd.DataFrame({"feature": feature_names, "importance": r.importances_mean})
-        return imp.sort_values("importance", ascending=False)
-    except Exception:
-        return pd.DataFrame(columns=["feature", "importance"])
+    r = permutation_importance(
+        model,
+        X_enc,
+        y,
+        n_repeats=2,      # smaller = lighter
+        random_state=42,
+        n_jobs=1          # IMPORTANT: single-thread reduces memory spikes
+    )
+    imp = pd.DataFrame({"feature": feature_names, "importance": r.importances_mean})
+    return imp.sort_values("importance", ascending=False)
 
 
 def build_signals(inp: dict) -> list[str]:
@@ -530,8 +543,6 @@ if "customerID" in cat_cols:
     cat_cols.remove("customerID")
 cat_options = {c: sorted(raw_df[c].dropna().unique().tolist()) for c in cat_cols}
 
-global_imp = compute_global_importance(raw_df, model, feature_names, encoders)
-
 st.markdown(
     f"""
     <div class="hero">
@@ -573,9 +584,25 @@ def render_explainability():
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.subheader("Explainability (Global drivers)")
 
+    st.caption("To avoid Streamlit Cloud memory limits, global importance is computed only when you turn it ON.")
+    compute = st.toggle("Compute global importance (slower)", value=False)
+    if not compute:
+        st.info("Toggle ON to compute top global drivers (uses small sample to stay memory-safe).")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    with st.spinner("Computing global importance (memory-safe mode)..."):
+        try:
+            global_imp = compute_global_importance(raw_df, model, feature_names, encoders, sample_n=200)
+        except Exception as e:
+            st.error("Failed to compute importance.")
+            st.code(str(e))
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
     if global_imp is not None and not global_imp.empty:
         top = global_imp.head(12)
-        fig = px.bar(top, x="importance", y="feature", orientation="h", title="Top global drivers")
+        fig = px.bar(top, x="importance", y="feature", orientation="h", title="Top global drivers (permutation importance)")
         fig.update_layout(template="plotly_white", height=420, margin=dict(l=10, r=10, t=56, b=10))
         st.plotly_chart(fig, use_container_width=True)
     else:
@@ -671,10 +698,15 @@ def manual_form():
 def paste_one():
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.subheader("Paste one customer (fast)")
+
     sample = (
-        "gender,SeniorCitizen,Partner,Dependents,tenure,PhoneService,MultipleLines,InternetService,OnlineSecurity,OnlineBackup,DeviceProtection,TechSupport,StreamingTV,StreamingMovies,Contract,PaperlessBilling,PaymentMethod,MonthlyCharges,TotalCharges\n"
-        "Female,0,No,No,4,Yes,No,Fiber optic,No,No,No,No,Yes,Yes,Month-to-month,Yes,Electronic check,94.65,378.60"
+        "gender,SeniorCitizen,Partner,Dependents,tenure,PhoneService,MultipleLines,InternetService,"
+        "OnlineSecurity,OnlineBackup,DeviceProtection,TechSupport,StreamingTV,StreamingMovies,"
+        "Contract,PaperlessBilling,PaymentMethod,MonthlyCharges,TotalCharges\n"
+        "Female,0,No,No,4,Yes,No,Fiber optic,No,No,No,No,Yes,Yes,Month-to-month,"
+        "Yes,Electronic check,94.65,378.60"
     )
+
     pasted = st.text_area("Paste 1-row CSV (with header)", height=160, value=sample)
     run = st.button("Score pasted customer", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
@@ -689,7 +721,7 @@ def paste_one():
             return False, None
         return True, df.iloc[0].to_dict()
     except Exception as e:
-        st.error("Could not parse input.")
+        st.error("Invalid CSV format.")
         st.code(str(e))
         return False, None
 
@@ -697,6 +729,7 @@ def paste_one():
 def batch_upload():
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.subheader("Upload CSV (batch scoring)")
+
     up = st.file_uploader("Upload CSV", type=["csv"])
 
     template_df = pd.DataFrame([{c: "" for c in feature_names}])
@@ -713,11 +746,18 @@ def batch_upload():
         return None
 
     df = pd.read_csv(up)
+
     if "customerID" in df.columns:
         df = df.drop(columns=["customerID"])
 
     if "TotalCharges" in df.columns:
-        df["TotalCharges"] = df["TotalCharges"].astype(str).str.strip().replace({"": "0.0", " ": "0.0"}).astype(float)
+        df["TotalCharges"] = (
+            df["TotalCharges"]
+            .astype(str)
+            .str.strip()
+            .replace({"": "0.0", " ": "0.0"})
+            .astype(float)
+        )
 
     missing = [c for c in feature_names if c not in df.columns]
     if missing:
@@ -737,9 +777,10 @@ def batch_upload():
 
 def render_home():
     st.markdown("## Home / Overview")
-    hist = db_read(limit=800)
+    hist = db_read(limit=500)
+
     if hist.empty:
-        st.info("No history yet. Score a customer or run batch scoring to start.")
+        st.info("No scoring history yet. Start by scoring a customer.")
         return
 
     total_scored = len(hist)
@@ -747,7 +788,7 @@ def render_home():
     high = int((hist["risk_label"] == "High Risk").sum())
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total scored (history)", total_scored)
+    c1.metric("Total scored", total_scored)
     c2.metric("Flagged", flagged)
     c3.metric("High Risk", high)
 
@@ -760,6 +801,7 @@ def render_home():
 def render_history():
     st.markdown("## History")
     hist = db_read(limit=1000)
+
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     if hist.empty:
         st.info("No history yet.")
@@ -780,24 +822,29 @@ def render_insights():
 
     bins_mc = np.linspace(df_i["MonthlyCharges"].min(), df_i["MonthlyCharges"].max(), 12)
     mc_trend = churn_rate_by_bins(df_i, "MonthlyCharges", bins_mc)
-    fig1 = px.line(mc_trend, x="bin_label", y="Churn_bin", markers=True, title="Churn rate vs MonthlyCharges (binned)")
-    fig1.update_traces(line=dict(width=3))
-    st.plotly_chart(make_layout(fig1, 520), use_container_width=True)
+    fig1 = px.line(mc_trend, x="bin_label", y="Churn_bin", markers=True,
+                   title="Churn rate vs MonthlyCharges (binned)")
+    st.plotly_chart(make_layout(fig1), use_container_width=True)
 
     bins_t = np.array([0, 3, 6, 12, 24, 36, 48, 60, 72, 1000])
     t_trend = churn_rate_by_bins(df_i, "tenure", bins_t)
-    fig2 = px.bar(t_trend, x="bin_label", y="Churn_bin", title="Churn rate by tenure stage")
-    st.plotly_chart(make_layout(fig2, 520), use_container_width=True)
+    fig2 = px.bar(t_trend, x="bin_label", y="Churn_bin",
+                  title="Churn rate by tenure stage")
+    st.plotly_chart(make_layout(fig2), use_container_width=True)
 
-    contract_churn = df_i.groupby("Contract")["Churn_bin"].mean().sort_values(ascending=False).reset_index()
-    contract_churn.columns = ["Contract", "AvgChurnRate"]
-    fig3 = px.bar(contract_churn, x="Contract", y="AvgChurnRate", title="Average churn rate by contract type", text="AvgChurnRate")
-    fig3.update_traces(texttemplate="%{text:.2f}", textposition="outside", cliponaxis=False)
+    contract_churn = (
+        df_i.groupby("Contract")["Churn_bin"]
+        .mean()
+        .sort_values(ascending=False)
+        .reset_index()
+    )
+    fig3 = px.bar(contract_churn, x="Contract", y="Churn_bin",
+                  title="Average churn rate by contract type")
     st.plotly_chart(make_layout(fig3, 460), use_container_width=True)
 
 
 # =========================
-# Sidebar navigation
+# Navigation Router
 # =========================
 if page == "Home":
     render_home()
@@ -833,23 +880,11 @@ elif page == "Score (Single)":
 
             a, b, c = st.columns(3)
             a.metric("Rows scored", total)
-            b.metric(f"Flagged (≥ {threshold:.2f})", flagged)
+            b.metric("Flagged", flagged)
             c.metric("Not flagged", total - flagged)
 
-            show_flagged = st.toggle("Show only flagged rows", value=False)
-            top_n = st.slider("Top N highest risk", 10, 200, 50, 10)
-
-            view = out.copy()
-            if show_flagged:
-                view = view[view["churn_prob"] >= threshold]
-
-            top_view = view.sort_values("churn_prob", ascending=False).head(top_n)
-            st.dataframe(top_view, use_container_width=True, height=380)
-
-            fig = px.histogram(out, x="churn_prob", nbins=30, title="Batch distribution: churn probabilities")
-            fig.add_vline(x=threshold, line_width=4, line_dash="dash")
-            fig.update_layout(template="plotly_white", height=520, margin=dict(l=10, r=10, t=56, b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            top_view = out.sort_values("churn_prob", ascending=False).head(50)
+            st.dataframe(top_view, use_container_width=True)
 
             st.download_button(
                 "⬇️ Download scored CSV",
@@ -860,10 +895,8 @@ elif page == "Score (Single)":
             )
             st.markdown("</div>", unsafe_allow_html=True)
 
-            db_insert("batch_upload", float(out["churn_prob"].mean()), "Batch", threshold, {"rows": int(total), "flagged": int(flagged)})
-
     if st.session_state["last_scored"] is not None:
-        _, inp, prob, _label = st.session_state["last_scored"]
+        _, inp, prob, _ = st.session_state["last_scored"]
         decision = render_decision(inp, prob)
         render_explainability()
         render_playbook(decision)
@@ -871,29 +904,21 @@ elif page == "Score (Single)":
 elif page == "Batch Scoring":
     out = batch_upload()
     if out is not None:
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.subheader("Batch results")
-        st.dataframe(out.sort_values("churn_prob", ascending=False).head(80), use_container_width=True, height=420)
-        st.download_button(
-            "⬇️ Download scored CSV",
-            data=out.to_csv(index=False).encode("utf-8"),
-            file_name="churn_scored.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.dataframe(out.sort_values("churn_prob", ascending=False).head(100),
+                     use_container_width=True)
 
 elif page == "Insights":
     render_insights()
 
 elif page == "Playbook":
     if st.session_state["last_scored"] is None:
-        st.info("Score a customer first — the playbook adapts to the risk level.")
+        st.info("Score a customer first to see the playbook.")
     else:
-        _, inp, prob, _label = st.session_state["last_scored"]
+        _, inp, prob, _ = st.session_state["last_scored"]
         decision = render_decision(inp, prob)
         render_explainability()
         render_playbook(decision)
 
 elif page == "History":
     render_history()
+
